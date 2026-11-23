@@ -48,10 +48,13 @@ jobs:
       run: python -m pytest tests/
     - name: levantar docker compose
       env:
-        SECRET_KEY: ${{ secrets.SECRET_KEY }}
-        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-        POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+        POSTGRES_USER=${{secrets.POSTGRES_USER}}
+        POSTGRES_PASSWORD=${{secrets.POSTGRES_PASSWORD}}
+        SECRET_KEY=${{secrets.SECRET_KEY}}
+        API_KEY=${{secrets.API_KEY}}
+        GF_SECURITY_ADMIN_USER=${{secrets.GF_SECURITY_ADMIN_USER}}
+        GF_SECURITY_ADMIN_PASSWORD=${{secrets.GF_SECURITY_ADMIN_PASSWORD}}
+        BASE_PATH=${{secrets.BASE_PATH}}
       run: docker compose up -d
 
     - name: verificar que el servicio postgres está listo
