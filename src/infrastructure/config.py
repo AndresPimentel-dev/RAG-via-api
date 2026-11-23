@@ -1,0 +1,18 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class SettingsClass(BaseSettings):
+    DATABASE_URL: str
+    SECRET_KEY: str
+    API_KEY: str
+    ALGORITHM: str = "HS256"
+    EXPIRE_TOKEN_TIME: int = 30
+    REDIS_URL: str
+    BASE_PATH: str
+
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+
+settings = SettingsClass()

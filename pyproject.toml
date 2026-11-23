@@ -1,0 +1,6 @@
+[tool.ruff.lint]
+exclude = [
+    "alembic/versions/*",
+    "alembic/env.py",
+]
+ignore = ["B008"]

@@ -1,0 +1,189 @@
+services:
+  # ==========================================
+  # ENTORNO DE TESTS (Ejecutar con: docker compose --profile test up --abort-on-container-exit)
+  # ==========================================
+  tests_database:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: tests_database_user
+      POSTGRES_PASSWORD: tests_database_password
+      POSTGRES_DB: tests_database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tests_database_user -d tests_database"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  tests_container:
+    build: .
+    image: rag_api:latest
+    environment:
+      SECRET_KEY: fakesecretkeyforonlytest
+      API_KEY: fakegooglesecretkeyfortest
+      REDIS_URL: fakeredisurlfortest/6379
+      GEMINI_API_KEY: fakegooglesecretkeyfortest
+      DATABASE_URL: postgresql+psycopg2://tests_database_user:tests_database_password@tests_database:5432/tests_database
+    command: /bin/sh -c "python -m pytest && ruff check && ruff format --check"
+    depends_on:
+      tests_database:
+        condition: service_healthy
+
+  # ==========================================
+  # BASE DE DATOS Y CACHÉ (PRODUCCIÓN)
+  # ==========================================
+  production_database:
+    image: pgvector/pgvector:pg15
+    container_name: production_database
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: rag_production_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d rag_production_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_container
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  # ==========================================
+  # MIGRACIONES Y BACKEND
+  # ==========================================
+  migrations:
+    build: .
+    image: rag_api:latest
+    container_name: database_migrations
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@production_database:5432/rag_production_db
+      SECRET_KEY: ${SECRET_KEY}
+      REDIS_URL: fakeredisurlfortest/6379
+    depends_on:
+      tests_container:
+        condition: service_started
+      production_database:
+        condition: service_healthy
+    command: /bin/sh -c "alembic upgrade head"
+
+  api:
+    build: .
+    image: rag_api:latest
+    container_name: rag_api_container
+    volumes:
+      - uploads_data:${BASE_PATH}
+    restart: unless-stopped
+    environment:
+      BASE_PATH: ${BASE_PATH}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@production_database:5432/rag_production_db
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: ${SECRET_KEY}
+      API_KEY: ${API_KEY}
+    depends_on:
+      production_database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_started
+
+  worker:
+    build: .
+    image: rag_api:latest
+    container_name: celery_worker
+    volumes:
+      - uploads_data:${BASE_PATH}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@production_database:5432/rag_production_db
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: ${SECRET_KEY}
+      API_KEY: ${API_KEY}
+    depends_on:
+      production_database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    command: celery -A src.infrastructure.celery.celery_app.celery_app worker --loglevel=info
+
+  reverse_proxy:
+    image: caddy:2-alpine
+    container_name: caddy_container
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - ./caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - api
+
+  # ==========================================
+  # OBSERVABILIDAD (Prometheus, Loki, Alloy, Grafana)
+  # ==========================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus_container
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - api
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    restart: unless-stopped
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml
+    command: -config.file=/etc/loki/loki-config.yml
+    depends_on:
+      - api
+
+  alloy:
+    image: grafana/alloy:latest
+    container_name: alloy
+    restart: unless-stopped
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana_container
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+      - loki
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  grafana_data:
+  uploads_data:

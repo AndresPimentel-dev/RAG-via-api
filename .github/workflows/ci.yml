@@ -1,0 +1,64 @@
+name: Backend CI
+
+#Disparadores: Definen cuándo se ejecuta el flujo automáticamente
+on:
+  push:
+    branches: [ "main", "develop" ]  #evita que se manualmente las pruebas y se ejecunte de manera automatica
+  pull_request:
+    branches: [ "main" ] #este se lee si o si aqui no tiene que aver fallos para que se ejecute correctamente el test o evalua los cambios antes de fusionarlos para proteger la rama principal
+
+#intalasr dependencias 
+jobs:
+  build:
+    runs-on: ubuntu-latest # Ejecuta el trabajo en una máquina virtual limpia de Linux
+
+    services:
+      postgres:
+        image: postgres:15
+        ports:
+          - 5432:5432
+        environment:
+          POSTGRES_USER: postgres_tests
+          POSTGRES_PASSWORD: password_tests
+          POSTGRES_DB: test_db
+
+    steps:
+    - name: Descargar codigo del repositorio 
+      uses: actions/checkout@v4 # Clona tu proyecto dentro de la máquina virtual
+
+    - name: Configurar Python
+      uses: actions/setup-python@v5 # Instala Python en la máquina virtual
+      with:
+        python-version: '3.11'
+
+    - name: Instalar dependencias del sistema y del proyecto
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+    
+    - name: correr ruff check y check format
+      run: |
+        ruff check .
+        ruff format .
+    
+    - name: correr tests contra database
+      env:
+        # variables que simulan tener las variables de entorno de produccion
+        DATABASE_URL: postgresql://postgres_tests:password_tests@localhost:5432/test_db
+      run: python -m pytest tests/
+    - name: levantar docker compose
+      env:
+        SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+      run: docker compose up -d
+
+    - name: verificar que el servicio postgres está listo
+      run: |
+        sleep 5
+        curl -k -L --http1.1 --retry 10 \
+                   --retry-delay 3 \
+                   --retry-connrefused \
+                   --fail \
+                   https://localhost/health
