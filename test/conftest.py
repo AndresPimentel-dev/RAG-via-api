@@ -6,9 +6,6 @@ from alembic.config import Config
 from alembic import command
 
 os.environ["REDIS_URL"] = "memory://"
-os.environ["DATABASE_URL"] = (
-    "postgresql+psycopg2://tests_database_user:tests_database_password@tests_database:5432/tests_database"
-)
 
 from unittest.mock import MagicMock
 
