@@ -16,3 +16,4 @@ celery
 redis
 pypdf
 ruff
+psycopg[binary]
