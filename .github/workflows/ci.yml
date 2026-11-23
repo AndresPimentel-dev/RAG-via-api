@@ -45,6 +45,9 @@ jobs:
       env:
         # variables que simulan tener las variables de entorno de produccion
         DATABASE_URL: postgresql://postgres_tests:password_tests@localhost:5432/test_db
+        SECRET_KEY: ${{secrets.SECRET_KEY}}
+        API_KEY: ${{secrets.API_KEY}}
+        BASE_PATH: ${{secrets.BASE_PATH}}
       run: python -m pytest tests/
     - name: levantar docker compose
       env:
