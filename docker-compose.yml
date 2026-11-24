@@ -158,46 +158,6 @@ services:
       loki:
         condition: service_started
 
-  tests_database:
-    image: pgvector/pgvector:pg15
-    profiles: ["test"]
-    environment:
-      POSTGRES_USER: tests_database_user
-      POSTGRES_PASSWORD: tests_database_password
-      POSTGRES_DB: tests_database
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
-      interval: 3s
-      timeout: 3s
-      retries: 10
-
-  tests_redis:
-    image: redis:7-alpine
-    profiles: ["test"]
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 3s
-      timeout: 3s
-      retries: 5
-
-  tests_container:
-    build: .
-    image: rag-api:local
-    profiles: ["test"]
-    environment:
-      DATABASE_URL: postgresql+psycopg2://tests_database_user:tests_database_password@tests_database:5432/tests_database
-      SECRET_KEY: test-only-secret-key
-      API_KEY: test-only-api-key
-      REDIS_URL: redis://tests_redis:6379
-      BASE_PATH: /tmp/rag-test-storage
-    command: ["sh", "-c", "python -m pytest && ruff check && ruff format --check"]
-    depends_on:
-      tests_database:
-        condition: service_healthy
-      tests_redis:
-        condition: service_healthy
-
 volumes:
   postgres_data:
   redis_data:

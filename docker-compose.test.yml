@@ -1,0 +1,73 @@
+x-test-environment: &test-environment
+  DATABASE_URL: postgresql+psycopg2://tests_database_user:tests_database_password@tests_database:5432/tests_database
+  SECRET_KEY: test-only-secret-key
+  API_KEY: test-only-api-key
+  REDIS_URL: redis://tests_redis:6379
+  BASE_PATH: /tmp/rag-test-storage
+
+services:
+  tests_database:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: tests_database_user
+      POSTGRES_PASSWORD: tests_database_password
+      POSTGRES_DB: tests_database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  tests_redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  tests_container:
+    build: .
+    image: rag-api:local
+    environment: *test-environment
+    command: ["sh", "-c", "python -m pytest && ruff check && ruff format --check"]
+    depends_on:
+      tests_database:
+        condition: service_healthy
+      tests_redis:
+        condition: service_healthy
+
+  migrations:
+    build: .
+    image: rag-api:local
+    restart: "no"
+    environment: *test-environment
+    depends_on:
+      tests_database:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+
+  api:
+    build: .
+    image: rag-api:local
+    environment: *test-environment
+    depends_on:
+      tests_database:
+        condition: service_healthy
+      tests_redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
