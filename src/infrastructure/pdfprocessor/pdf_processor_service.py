@@ -38,7 +38,7 @@ class PDFProcessorServiceInfrastruture(PDFProcessorService):
                 chunks.append(chunk)
                 start += chunk_size - overlap
 
-                return chunks
+            return chunks
         except Exception as e:
             self.log_provider.error_log(
                 message="error spliting text into chunks", context=str(e)
