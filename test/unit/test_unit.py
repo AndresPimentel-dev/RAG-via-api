@@ -103,6 +103,7 @@ def test_store_file():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
+    vector_database_repository=MagicMock()
     celery_service = MagicMock()
 
     entity = DocumentEntity(
@@ -122,6 +123,7 @@ def test_store_file():
         log_provider=log_provider,
         storage_service=storage_service,
         pdf_database_repository=pdf_database_repository,
+        vector_database_repository=vector_database_repository,
         celery_service=celery_service,
     )
 
@@ -144,6 +146,7 @@ def test_get_document_bytes():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
+    vector_database_repository=MagicMock()
     celery_service = MagicMock()
 
     entity = DocumentEntity(
@@ -162,6 +165,7 @@ def test_get_document_bytes():
         log_provider=log_provider,
         storage_service=storage_service,
         pdf_database_repository=pdf_database_repository,
+        vector_database_repository=vector_database_repository,
         celery_service=celery_service,
     )
 
@@ -179,12 +183,14 @@ def test_get_document_bytes_not_found_entity():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
+    vector_database_repository=MagicMock()
     celery_service = MagicMock()
 
     use_case = StorageUseCase(
         log_provider=log_provider,
         storage_service=storage_service,
         pdf_database_repository=pdf_database_repository,
+        vector_database_repository=vector_database_repository,
         celery_service=celery_service,
     )
 
@@ -201,6 +207,7 @@ def test_get_document_bytes_not_found_file():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
+    vector_database_repository=MagicMock()
     celery_service = MagicMock()
 
     entity = DocumentEntity(
@@ -219,6 +226,7 @@ def test_get_document_bytes_not_found_file():
         log_provider=log_provider,
         storage_service=storage_service,
         pdf_database_repository=pdf_database_repository,
+        vector_database_repository=vector_database_repository,
         celery_service=celery_service,
     )
 
@@ -234,6 +242,7 @@ def test_getget_documents_data_by_user_id():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
+    vector_database_repository = MagicMock()
     celery_service = MagicMock()
 
     entity = DocumentEntity(
@@ -251,6 +260,7 @@ def test_getget_documents_data_by_user_id():
         log_provider=log_provider,
         storage_service=storage_service,
         pdf_database_repository=pdf_database_repository,
+        vector_database_repository=vector_database_repository,
         celery_service=celery_service,
     )
 
@@ -266,6 +276,7 @@ def test_delete_file():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
+    vector_database_repository = MagicMock()
     celery_service = MagicMock()
 
     entity = DocumentEntity(
@@ -281,6 +292,7 @@ def test_delete_file():
         log_provider=log_provider,
         storage_service=storage_service,
         pdf_database_repository=pdf_database_repository,
+        vector_database_repository=vector_database_repository,
         celery_service=celery_service,
     )
 
@@ -302,11 +314,13 @@ def test_delte_file_document_not_found():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
+    vector_database_repository = MagicMock()
     celery_service = MagicMock()
     use_case = StorageUseCase(
         log_provider=log_provider,
         storage_service=storage_service,
         pdf_database_repository=pdf_database_repository,
+        vector_database_repository=vector_database_repository,
         celery_service=celery_service,
     )
 
