@@ -25,6 +25,18 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+    env:
+      # Variables para pytest (local)
+      DATABASE_URL: postgresql+psycopg2://tests_database_user:tests_database_password@localhost:5432/tests_database
+      SECRET_KEY: ci-only-secret-key
+      API_KEY: ci-only-api-key
+      REDIS_URL: memory://
+      BASE_PATH: /tmp/rag-test-storage
+      # Variables necesarias para interpolar docker-compose.yml en TODOS los pasos
+      POSTGRES_USER: ci_postgres_user
+      POSTGRES_PASSWORD: ci_postgres_password
+      GF_SECURITY_ADMIN_USER: ci_admin
+      GF_SECURITY_ADMIN_PASSWORD: ci_grafana_password
 
     env:
       DATABASE_URL: postgresql+psycopg2://tests_database_user:tests_database_password@localhost:5432/tests_database
@@ -56,15 +68,11 @@ jobs:
           ruff format --check
 
       - name: Start the Docker Compose stack
-        env:
-          POSTGRES_USER: ci_postgres_user
-          POSTGRES_PASSWORD: ci_postgres_password
-          SECRET_KEY: ci-compose-only-secret
-          API_KEY: ci-compose-only-api-key
-          GF_SECURITY_ADMIN_USER: ci_admin
-          GF_SECURITY_ADMIN_PASSWORD: ci_grafana_password
-          BASE_PATH: /app/storage
-        run: docker compose up --build --detach --wait --wait-timeout 240
+              env:
+                SECRET_KEY: ci-compose-only-secret
+                API_KEY: ci-compose-only-api-key
+                BASE_PATH: /app/storage
+              run: docker compose up --build --detach --wait --wait-timeout 240
 
       - name: Verify the API health endpoint
         run: >-

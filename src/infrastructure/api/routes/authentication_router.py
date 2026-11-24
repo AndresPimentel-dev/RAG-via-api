@@ -12,7 +12,7 @@ router = APIRouter()
 def sign_up(
     data: UserCreate, use_case: UserUseCases = Depends(get_user_use_cases)
 ) -> TokenResponse:
-    new = use_case.create_user(data.username, data.email, data.password)
+    new = use_case.create_user(data.username, str(data.email), data.password)
 
     return {"access_token": new, "token_type": "bearer"}
 
