@@ -254,7 +254,7 @@ class InstrumentedRequestModelRepository(LLMService):
                 type="convert into embedings", model="text-embedding-004"
             ).time():
                 MODEL_OPERATIONS.labels(
-                    type="convert into embeddings", model="text-embedding-004"
+                    type="convert into embeddings", model="text-embedding-001"
                 ).inc()
 
                 response = self._decorated.generate_embeddings(
@@ -289,13 +289,13 @@ class InstrumentedRequestModelRepository(LLMService):
 
                 if hasattr(response, "usage_metadata") and response.usage_metadata:
                     MODEL_TOKENS.labels(
-                        model="gemini-2.5-flash", token_type="prompt"
+                        model="gemini-3.5-flash-lite", token_type="prompt"
                     ).inc(response.usage_metadata.prompt_token_count)
                     MODEL_TOKENS.labels(
-                        model="gemini-2.5-flash", token_type="response"
+                        model="gemini-3.5-flash-lite", token_type="response"
                     ).inc(response.usage_metadata.candidates_token_count)
                     MODEL_TOKENS.labels(
-                        model="gemini-2.5-flash", token_type="total"
+                        model="gemini-3.5-flash-lite", token_type="total"
                     ).inc(response.usage_metadata.total_token_count)
 
                 return response.text

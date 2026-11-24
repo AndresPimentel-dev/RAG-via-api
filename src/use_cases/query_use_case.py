@@ -28,11 +28,11 @@ class QueryUseCase:
             context = self.vector_repo.search_similar(
                 user_id, single_query_vector, document_id
             )
-            if context is None:
+            if not context:
                 raise NotFoundException("Context not found")
         else:
             context = self.vector_repo.search_similar(user_id, single_query_vector)
-            if context is None:
+            if not context:
                 raise NotFoundException("Context not found")
 
         prompt = (

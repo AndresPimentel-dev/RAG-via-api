@@ -20,6 +20,8 @@ class PDFProcessorServiceInfrastruture(PDFProcessorService):
                 text = page.extract_text()
                 if text:
                     extracted_text += text + "\n"
+            if not text.strip():
+                raise InfrastructureException("PDF contains no extractable text")
             return extracted_text
         except Exception as e:
             self.log_provider.error_log(message="error extracting text", context=str(e))

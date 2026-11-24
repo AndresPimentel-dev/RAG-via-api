@@ -140,15 +140,13 @@ class VectorDatabaseRepositoryInfrastructure(VectorDatabaseRepository):
 
     def delete_context(self, document_id: int, user_id: int):
         try:
-            statement = Select(VectorsTable).where(
-                VectorsTable.owner_id == user_id,
-                VectorsTable.document_id == document_id,
+            (
+                self.db.query(VectorsTable)
+                .filter(VectorsTable.document_id == document_id, 
+                        VectorsTable.owner_id == user_id)
+                .delete(synchronize_session=False)
             )
-            vector_record = self.db.scalars(statement).first()
-
-            if vector_record:
-                self.db.delete(vector_record)
-                self.db.commit()
+            self.db.commit()
             return
         except Exception as e:
             self.db.rollback()

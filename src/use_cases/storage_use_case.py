@@ -8,6 +8,7 @@ from src.domain.interfaces import (
     LogProvider,
     PDFDatabaseRepository,
     StorageService,
+    VectorDatabaseRepository
 )
 
 
@@ -17,10 +18,12 @@ class StorageUseCase:
         log_provider: LogProvider,
         storage_service: StorageService,
         pdf_database_repository: PDFDatabaseRepository,
+        vector_database_repository: VectorDatabaseRepository,
         celery_service: CeleryTaskService,
     ):
         self.storage_service = storage_service
         self.pdf_database_repository = pdf_database_repository
+        self.vector_database_repository = vector_database_repository
         self.log_provider = log_provider
         self.celery_service = celery_service
 
@@ -78,4 +81,6 @@ class StorageUseCase:
         self.pdf_database_repository.delete_document(
             document_id=document.id, user_id=user_id
         )
+        self.vector_database_repository.delete_context(document_id=document_id,
+                                                       user_id=user_id)
         self.log_provider.info_log(message="file deleted correctly")
