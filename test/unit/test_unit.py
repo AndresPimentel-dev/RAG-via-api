@@ -103,7 +103,7 @@ def test_store_file():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
-    vector_database_repository=MagicMock()
+    vector_database_repository = MagicMock()
     celery_service = MagicMock()
 
     entity = DocumentEntity(
@@ -146,7 +146,7 @@ def test_get_document_bytes():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
-    vector_database_repository=MagicMock()
+    vector_database_repository = MagicMock()
     celery_service = MagicMock()
 
     entity = DocumentEntity(
@@ -183,7 +183,7 @@ def test_get_document_bytes_not_found_entity():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
-    vector_database_repository=MagicMock()
+    vector_database_repository = MagicMock()
     celery_service = MagicMock()
 
     use_case = StorageUseCase(
@@ -207,7 +207,7 @@ def test_get_document_bytes_not_found_file():
     log_provider = MagicMock()
     storage_service = MagicMock()
     pdf_database_repository = MagicMock()
-    vector_database_repository=MagicMock()
+    vector_database_repository = MagicMock()
     celery_service = MagicMock()
 
     entity = DocumentEntity(

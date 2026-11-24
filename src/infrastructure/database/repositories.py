@@ -142,8 +142,10 @@ class VectorDatabaseRepositoryInfrastructure(VectorDatabaseRepository):
         try:
             (
                 self.db.query(VectorsTable)
-                .filter(VectorsTable.document_id == document_id, 
-                        VectorsTable.owner_id == user_id)
+                .filter(
+                    VectorsTable.document_id == document_id,
+                    VectorsTable.owner_id == user_id,
+                )
                 .delete(synchronize_session=False)
             )
             self.db.commit()

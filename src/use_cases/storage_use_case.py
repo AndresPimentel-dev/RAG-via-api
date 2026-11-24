@@ -8,7 +8,7 @@ from src.domain.interfaces import (
     LogProvider,
     PDFDatabaseRepository,
     StorageService,
-    VectorDatabaseRepository
+    VectorDatabaseRepository,
 )
 
 
@@ -81,6 +81,7 @@ class StorageUseCase:
         self.pdf_database_repository.delete_document(
             document_id=document.id, user_id=user_id
         )
-        self.vector_database_repository.delete_context(document_id=document_id,
-                                                       user_id=user_id)
+        self.vector_database_repository.delete_context(
+            document_id=document_id, user_id=user_id
+        )
         self.log_provider.info_log(message="file deleted correctly")
