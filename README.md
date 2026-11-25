@@ -1,413 +1,378 @@
-# RAG Provider via API
+# RAG provider via API
 
-A production-oriented Retrieval-Augmented Generation (RAG) API for uploading PDF documents, converting them into 3072-dimensional vector embeddings, and answering questions grounded in the user's own documents.
+API de **Retrieval-Augmented Generation (RAG)** para cargar documentos PDF y hacer preguntas sobre su contenido. La aplicación extrae y fragmenta el texto, genera embeddings con Google Gemini, guarda los vectores en PostgreSQL con pgvector y recupera contexto relevante para construir respuestas.
 
-The project combines FastAPI, PostgreSQL with pgvector, Redis/Celery, Google Gemini, Caddy, Prometheus, Loki, Alloy, and Grafana. It follows a modular layered architecture with domain entities and interfaces, application use cases, and infrastructure adapters.
+El proyecto incluye autenticación, procesamiento asíncrono, despliegue con Docker Compose y observabilidad con Prometheus, Grafana, Loki y Grafana Alloy. También cuenta con evidencia de despliegue en una instancia **Amazon EC2**.
 
-## Features
+> **Alcance:** es una implementación funcional y desplegable, no una garantía de preparación para producción sin configuración adicional. Revisa las limitaciones y recomendaciones de seguridad antes de exponerla públicamente.
 
-- JWT-based user registration and login
-- PDF upload with MIME-type validation
-- Asynchronous document processing with Celery
-- Text extraction and overlapping text chunking
-- Vector embeddings through Google Gemini
-- Semantic search with PostgreSQL/pgvector
-- User-scoped and optional document-scoped queries
-- File and vector metadata persisted in PostgreSQL
-- Docker Compose deployment with an HTTPS-ready Caddy reverse proxy
-- Health, metrics, and request-observability endpoints
-- Prometheus metrics plus Loki/Grafana log collection
-- Database migrations managed by Alembic
-- Unit and integration test suites
+## Contenido
 
-## How It Works
+- [Características](#características)
+- [Arquitectura](#arquitectura)
+- [Tecnologías](#tecnologías)
+- [Ejecución con Docker Compose](#ejecución-con-docker-compose)
+- [Despliegue en AWS EC2](#despliegue-en-aws-ec2)
+- [API](#api)
+- [Observabilidad](#observabilidad)
+- [Pruebas](#pruebas)
+- [Datos y privacidad](#datos-y-privacidad)
+- [Limitaciones y siguientes pasos](#limitaciones-y-siguientes-pasos)
+- [Estructura](#estructura)
+- [Licencia](#licencia)
 
-1. A user registers or logs in.
-2. The API returns a bearer access token.
-3. The authenticated user uploads a PDF.
-4. The API stores the original file and creates a document record with `pending` status.
-5. Celery receives an asynchronous processing task.
-6. The worker extracts text, splits it into 500-character chunks with 50-character overlap, creates Gemini embeddings, and stores chunk vectors in pgvector.
-7. The document status becomes `processed`. Processing failures become `failed`.
-8. A query generates an embedding, retrieves relevant chunks for the user (and optionally for one document), and sends that context to the Gemini text model.
-9. The model returns an answer constrained to the supplied context.
+## Características
 
-## Architecture
+- Registro e inicio de sesión con tokens bearer JWT.
+- Carga, listado y eliminación de documentos PDF por usuario.
+- Procesamiento de PDF fuera de la petición HTTP mediante Celery y Redis.
+- Extracción de texto, fragmentación en bloques de 500 caracteres con 50 caracteres de solapamiento y generación de embeddings.
+- Búsqueda semántica con pgvector, limitada a los documentos del usuario autenticado.
+- Preguntas sobre todos los documentos del usuario o sobre un documento elegido.
+- Migraciones de esquema con Alembic.
+- Endpoint de salud y métricas Prometheus.
+- Recolección centralizada de logs de contenedores con Alloy y Loki.
+- Interfaz de Grafana con orígenes Prometheus y Loki provisionados.
 
-```text
-src/
-├── domain/                 # Entities, enums, interfaces, and domain exceptions
-├── use_cases/              # Authentication, storage, querying, and processing workflows
-└── infrastructure/
-    ├── api/                # FastAPI app, routes, schemas, dependencies, middleware
-    ├── celery/             # Celery app and PDF-processing task trigger/worker
-    ├── database/           # SQLAlchemy models, connection, and repositories
-    ├── model/              # Google Gemini integration
-    ├── pdfprocessor/       # PDF text extraction and chunking
-    ├── security/           # Password hashing and JWT handling
-    ├── storage/            # Local PDF storage adapter
-    ├── logging/            # Application logging
-    └── metrics/            # Instrumented repositories and Prometheus metrics
+## Arquitectura
+
+```mermaid
+flowchart LR
+    U[Cliente / Swagger UI] -->|HTTP o HTTPS| C[Caddy]
+    C -->|proxy| API[FastAPI]
+
+    API -->|usuarios, documentos y vectores| DB[(PostgreSQL + pgvector)]
+    API -->|archivos PDF| FS[(Volumen de archivos)]
+    API -->|tareas de procesamiento| R[(Redis)]
+    R --> W[Worker Celery]
+    W -->|lee PDF| FS
+    W -->|estado y embeddings| DB
+
+    API -->|embeddings y respuestas| G[Google Gemini API]
+    W -->|embeddings| G
+
+    P[Prometheus] -->|scrape /metrics| API
+    A[Grafana Alloy] -->|logs de Docker| L[Loki]
+    GF[Grafana] --> P
+    GF --> L
 ```
 
-### Document Statuses
+### Flujo de un documento
 
-| Status | Meaning |
+1. El usuario se registra o inicia sesión y obtiene un token JWT.
+2. La API recibe el PDF, guarda el archivo en el volumen local y crea un registro con estado `pending`.
+3. La API encola una tarea en Redis; un worker Celery la procesa de forma asíncrona.
+4. El worker extrae el texto del PDF, lo divide en bloques y solicita embeddings a Gemini.
+5. Los bloques y vectores se guardan en pgvector; el documento pasa a `processed`. Si falla el procesamiento, queda en `failed`.
+6. Para una consulta, la API genera un embedding de la pregunta, recupera contexto del usuario en pgvector y solicita a Gemini una respuesta basada en ese contexto.
+
+### Estados de documento
+
+| Estado | Significado |
 |---|---|
-| `pending` | Stored and waiting for worker processing |
-| `processing` | Reserved status in the domain model; the current worker updates it only on success/failure |
-| `processed` | Text and vectors were generated successfully |
-| `failed` | Processing failed; the worker records the error and marks the document failed |
+| `pending` | El archivo se guardó y espera procesamiento. |
+| `processed` | El texto y los embeddings se procesaron correctamente. |
+| `failed` | El procesamiento no pudo completarse. |
 
-## Technology Stack
+El modelo de dominio también define `processing`, pero el worker actual no persiste ese estado durante la ejecución.
 
-| Area | Technology |
+## Tecnologías
+
+| Componente | Tecnología |
 |---|---|
-| API | FastAPI, Uvicorn |
-| Database | PostgreSQL 15 with pgvector |
-| ORM/migrations | SQLAlchemy, Alembic |
-| Authentication | OAuth2 password flow, JWT, pwdlib/Argon2 |
-| AI | Google Gemini Embeddings and Gemini text generation |
-| Async processing | Redis 7, Celery |
-| PDF processing | pypdf |
-| Reverse proxy | Caddy 2 |
-| Metrics | Prometheus, prometheus-client |
-| Logging | Loki, Grafana Alloy |
-| Dashboards | Grafana |
-| Packaging | Docker, Docker Compose |
+| API y documentación interactiva | FastAPI, Uvicorn, Swagger UI |
+| Persistencia relacional y vectorial | PostgreSQL 15, pgvector, SQLAlchemy |
+| Migraciones | Alembic |
+| Autenticación | OAuth2 password flow, JWT, hash de contraseñas con Argon2 |
+| Embeddings y generación | Google Gemini (`gemini-embedding-001`, `gemini-3.5-flash-lite`) |
+| Procesamiento en segundo plano | Celery, Redis 7 |
+| Lectura de PDF | pypdf |
+| Proxy inverso | Caddy 2 |
+| Métricas | prometheus-client, Prometheus |
+| Logs | Grafana Alloy, Loki |
+| Visualización | Grafana |
+| Ejecución | Docker, Docker Compose |
 
-## API Reference
+## Requisitos
 
-The interactive documentation is available at:
+- Docker Engine y Docker Compose v2.
+- Una clave de API válida para Google Gemini.
+- Para acceder desde Internet: una instancia EC2, reglas de red apropiadas y, para HTTPS automático de Caddy, un dominio que apunte a la instancia.
 
-- Swagger UI: `http://localhost/docs`
-- OpenAPI JSON: `http://localhost/openapi.json`
+## Ejecución con Docker Compose
 
-All application endpoints other than `/health` and `/metrics` are under `/api/v1`.
+### 1. Configurar el entorno
 
-### Health and Metrics
+Desde la raíz del repositorio, crea un archivo `.env` (está excluido de Git) con valores propios:
 
-| Method | Endpoint | Authentication | Description |
+```dotenv
+POSTGRES_USER=rag_user
+POSTGRES_PASSWORD=reemplazar-por-una-clave-segura
+SECRET_KEY=reemplazar-por-un-secreto-aleatorio
+API_KEY=tu-clave-de-google-gemini
+GF_SECURITY_ADMIN_USER=admin
+GF_SECURITY_ADMIN_PASSWORD=reemplazar-por-una-clave-segura
+BASE_PATH=/app/storage
+```
+
+Genera un secreto JWT robusto localmente, por ejemplo:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
+```
+
+En un host Linux, limita el acceso al archivo:
+
+```bash
+chmod 600 .env
+```
+
+`DATABASE_URL` y `REDIS_URL` se construyen internamente en `docker-compose.yml`. No subas `.env`, claves de Gemini, contraseñas ni tokens al repositorio.
+
+### 2. Iniciar los servicios
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Compose inicia PostgreSQL con pgvector, Redis, las migraciones, la API, el worker Celery, Caddy, Prometheus, Loki, Alloy y Grafana. Las migraciones se ejecutan antes de que la API y el worker queden disponibles.
+
+### 3. Comprobar la aplicación
+
+La configuración local actual de Caddy usa `localhost`:
+
+- API y Swagger UI: <http://localhost/docs>
+- OpenAPI JSON: <http://localhost/openapi.json>
+- Salud: <http://localhost/health>
+- Métricas: <http://localhost/metrics>
+- Grafana: <http://localhost:3000>
+
+Prometheus, Loki, Redis y PostgreSQL no publican puertos en el host en la configuración Compose incluida.
+
+Comandos útiles:
+
+```bash
+docker compose logs -f api worker
+docker compose logs -f prometheus grafana loki alloy
+docker compose ps
+docker compose down
+```
+
+`docker compose down` conserva los volúmenes. **No uses `docker compose down -v` salvo que quieras eliminar también los datos persistidos** (base de datos, archivos, Redis, Grafana y datos de Caddy).
+
+## Despliegue en AWS EC2
+
+Este proyecto fue desplegado en una instancia EC2. Las capturas siguientes documentan la instancia y su configuración de red; no representan una garantía de disponibilidad continua ni publican una URL de servicio estable.
+
+### Evidencia del despliegue
+
+**Instancia EC2:**
+
+![Instancia EC2 ejecutándose en AWS](docs/images/amazonconsole2.png)
+
+**Configuración del grupo de seguridad:**
+
+![Grupo de seguridad de EC2](docs/images/amazonconsole1.png)
+
+**Swagger UI de la API desplegada:**
+
+![Documentación Swagger de la API](docs/images/swaggerdocumentation.png)
+
+> La captura de terminal disponible en `docs/images/sshconectionviaterminal.png` no se incluye aquí: contiene credenciales de despliegue visibles. Antes de compartir o versionar esa imagen, revoca las credenciales expuestas y reemplázala por una copia correctamente censurada.
+
+### Pasos para desplegar una instancia propia
+
+1. **Crea una instancia EC2** con una distribución Linux compatible con Docker (por ejemplo, Ubuntu LTS) y almacenamiento suficiente para imágenes, base de datos y documentos. Para conservar una dirección estable, asocia una Elastic IP.
+2. **Configura el grupo de seguridad** siguiendo el principio de mínimo acceso:
+   - SSH (TCP `22`): solo desde tu IP o red administrativa.
+   - HTTP/HTTPS (TCP `80`/`443`): desde Internet si la aplicación será pública y se usará un dominio.
+   - Grafana (TCP `3000`): no lo abras públicamente; limita el origen a una IP administrativa o accede por túnel SSH.
+   - No abras al público los puertos de PostgreSQL, Redis, Prometheus ni el puerto interno de FastAPI (`8000`).
+3. **Instala Docker Engine y el plugin Docker Compose v2** siguiendo la documentación oficial de Docker para la distribución elegida. Conéctate por SSH y clona el repositorio:
+
+   ```bash
+   git clone https://github.com/AndresPimentel-dev/RAG-via-api.git
+   cd RAG-via-api
+   ```
+
+4. **Configura `.env`** como se describe en [Ejecución con Docker Compose](#ejecución-con-docker-compose). Usa valores únicos y fuertes; no reutilices credenciales de desarrollo ni incluyas el archivo en Git.
+5. **Configura el dominio antes de iniciar Caddy.** Crea un registro DNS `A` que apunte a la IP pública/Elastic IP de la instancia y cambia el bloque `localhost` de `caddyfile` por tu dominio, por ejemplo:
+
+   ```caddyfile
+   rag.ejemplo.com {
+       reverse_proxy api:8000
+   }
+   ```
+
+   Caddy puede gestionar HTTPS automáticamente cuando el dominio resuelve a la instancia y los puertos `80` y `443` son accesibles. Sin dominio, no asumas que `localhost` servirá la API públicamente ni que habrá un certificado HTTPS válido.
+6. **Inicia y verifica los contenedores:**
+
+   ```bash
+   docker compose up --build -d
+   docker compose ps
+   docker compose logs --tail=100 api worker migrations
+   ```
+
+7. **Valida desde tu equipo** el endpoint `/health` y la documentación `/docs` usando tu dominio. Para acceder a Grafana sin exponer el puerto `3000`, crea un túnel SSH:
+
+   ```bash
+   ssh -L 3000:127.0.0.1:3000 usuario@IP_PUBLICA_EC2
+   ```
+
+   Abre <http://localhost:3000> e inicia sesión con las credenciales configuradas en `GF_SECURITY_ADMIN_USER` y `GF_SECURITY_ADMIN_PASSWORD`.
+
+Para actualizar una instalación existente, revisa los cambios y ejecuta `git pull` seguido de `docker compose up --build -d`. Haz respaldos antes de actualizar la base de datos o cambiar la instancia. Los volúmenes Docker residen en el disco de la instancia y **no sustituyen un respaldo externo**.
+
+## API
+
+La documentación interactiva generada por FastAPI está disponible en `/docs`; también se publica `/openapi.json`. Los endpoints de negocio usan el prefijo `/api/v1`.
+
+### Endpoints
+
+| Método | Ruta | Autenticación | Descripción |
 |---|---|---:|---|
-| `GET` | `/health` | No | Basic health response |
-| `GET` | `/metrics` | No | Prometheus metrics |
+| `GET` | `/health` | No | Comprueba que la API responde. |
+| `GET` | `/metrics` | No | Expone métricas en formato Prometheus. |
+| `POST` | `/api/v1/register` | No | Crea una cuenta y devuelve un token. |
+| `POST` | `/api/v1/login` | No | Inicia sesión y devuelve un token. |
+| `POST` | `/api/v1/storage` | Bearer | Carga un PDF y encola su procesamiento. |
+| `GET` | `/api/v1/get` | Bearer | Lista los documentos del usuario autenticado. |
+| `DELETE` | `/api/v1/delete/{document_id}` | Bearer | Elimina un documento del usuario y sus vectores. |
+| `POST` | `/api/v1/query` | Bearer | Consulta el contexto indexado del usuario. |
 
-### Authentication
+### Autenticación
 
-| Method | Endpoint | Authentication | Description |
-|---|---|---:|---|
-| `POST` | `/api/v1/register` | No | Create a user and return a bearer token |
-| `POST` | `/api/v1/login` | No | Login with form fields `username` and `password` |
-
-Registration request:
+El registro recibe JSON:
 
 ```json
 {
-  "username": "jane",
-  "email": "jane@example.com",
-  "password": "a-strong-password"
+  "username": "ana",
+  "email": "ana@example.com",
+  "password": "una-clave-segura"
 }
 ```
 
-Login uses OAuth2 form encoding, not JSON:
+El login usa `application/x-www-form-urlencoded`, con los campos `username` y `password`:
 
 ```bash
-curl -X POST "http://localhost/api/v1/login" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=jane&password=a-strong-password"
+curl -X POST http://localhost/api/v1/login \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'username=ana' \
+  --data-urlencode 'password=TU_CLAVE'
 ```
 
-The response is:
+Ambos endpoints devuelven un `access_token` de tipo `bearer`. El token dura 30 minutos por defecto; la configuración actual no ofrece refresh tokens.
 
-```json
-{
-  "access_token": "<jwt>",
-  "token_type": "bearer"
-}
-```
+### Cargar y consultar documentos
 
-### Storage
-
-| Method | Endpoint | Authentication | Description |
-|---|---|---:|---|
-| `POST` | `/api/v1/storage` | Bearer | Upload a PDF and enqueue processing |
-| `GET` | `/api/v1/get` | Bearer | List the current user's documents |
-| `DELETE` | `/api/v1/delete/{document_id}` | Bearer | Delete a document owned by the user |
-
-Upload a PDF:
+Usa el token recibido al autenticarte:
 
 ```bash
-curl -X POST "http://localhost/api/v1/storage" \
+export TOKEN='PEGA_AQUI_EL_ACCESS_TOKEN'
+
+curl -X POST http://localhost/api/v1/storage \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file=@document.pdf;type=application/pdf"
+  -F 'file=@./documento.pdf;type=application/pdf'
 ```
 
-Document response:
+La carga responde con los datos del documento y su estado inicial `pending`. El procesamiento es asíncrono; consulta `GET /api/v1/get` para revisar el estado.
+
+Consulta todos los documentos procesados del usuario:
+
+```bash
+curl -X POST http://localhost/api/v1/query \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"request":"¿Cuál es el tema principal del documento?"}'
+```
+
+Para limitar la búsqueda a un documento, incluye su `file_id`:
 
 ```json
 {
-  "id": 1,
-  "filename": "document.pdf",
-  "file_path": "users/1/<uuid>_document.pdf",
-  "status": "pending",
-  "created_at": "2026-11-24T14:38:35Z"
-}
-```
-
-Only the user's own documents are returned or deleted. The upload endpoint rejects files whose reported content type is not `application/pdf`.
-
-### Query
-
-| Method | Endpoint | Authentication | Description |
-|---|---|---:|---|
-| `POST` | `/api/v1/query` | Bearer | Ask a question against all or one of the user's documents |
-
-```json
-{
-  "request": "What are the payment terms?",
+  "request": "¿Cuáles son las condiciones indicadas?",
   "file_id": 1
 }
 ```
 
-`file_id` is optional. If omitted, the API searches vectors from every processed document owned by the user.
+Las respuestas tienen el formato `{"answer": "..."}`. Si no existe contexto relevante, la API devuelve un error de contexto no encontrado, no una respuesta generada sin documentos.
+
+## Observabilidad
+
+### Métricas
+
+Prometheus consulta `api:8000/metrics` cada 15 segundos en la red interna de Docker. La API expone métricas HTTP y de operaciones/latencia/errores del ORM. El worker también instrumenta duración, resultados y errores de tareas Celery, pero el `prometheus.yml` actual solo configura el scrape de la API; por ello, las métricas internas del worker no quedan disponibles en Prometheus con la configuración incluida. Grafana tiene Prometheus provisionado como origen de datos.
+
+![Exploración de métricas en Grafana](docs/images/metrics.png)
+
+### Logs
+
+Grafana Alloy descubre contenedores Docker y envía sus logs a Loki. Grafana tiene Loki provisionado como segundo origen de datos.
+
+![Exploración de logs en Grafana](docs/images/logs.png)
+
+Grafana se publica en el puerto `3000` del host según el Compose actual. Restringe ese puerto en el grupo de seguridad de AWS y protege las credenciales de administrador.
+
+## Pruebas
+
+El archivo de Compose de pruebas configura PostgreSQL y Redis aislados; la suite comprueba que `DATABASE_URL` contenga `test` o `prueba` para reducir el riesgo de ejecutar pruebas contra una base de datos incorrecta.
+
+Con Docker Compose v2:
 
 ```bash
-curl -X POST "http://localhost/api/v1/query" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"request":"What are the payment terms?","file_id":1}'
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit tests_container
+docker compose -f docker-compose.test.yml down
 ```
 
-Example response:
+El contenedor de pruebas ejecuta `pytest`, `ruff check` y `ruff format --check`.
 
-```json
-{
-  "answer": "The context indicates that payment is due within 30 days."
-}
-```
+## Datos y privacidad
 
-## Environment Variables
+- Los PDF se guardan en el sistema de archivos local bajo `BASE_PATH` y los metadatos/embeddings en PostgreSQL. En Compose, ambos servicios usan volúmenes persistentes.
+- El procesamiento envía el texto extraído a Google Gemini para generar embeddings. Las consultas también envían la pregunta y el contexto recuperado al modelo para generar la respuesta. Revisa las condiciones y políticas aplicables antes de cargar información sensible.
+- La búsqueda y las operaciones de documentos se acotan al usuario autenticado.
+- El volumen de almacenamiento local no es un sistema de objetos compartido: varias réplicas de API/workers requerirían almacenamiento compartido o un adaptador de objetos y una estrategia consistente de acceso.
+- La carga valida el tipo MIME declarado como `application/pdf`; esta comprobación por sí sola no verifica el contenido real del archivo.
+- La API expone `/metrics` sin autenticación. Si se publica fuera de la red privada, restringe su acceso en el proxy o en la capa de red.
 
-Copy the example environment file before starting Compose:
+## Limitaciones y siguientes pasos
 
-```bash
-cp .env.example .env
-```
+Antes de usar el servicio en producción, evalúa al menos:
 
-| Variable | Required | Purpose |
-|---|---:|---|
-| `POSTGRES_USER` | Yes | PostgreSQL administrator role |
-| `POSTGRES_PASSWORD` | Yes | PostgreSQL administrator password |
-| `SECRET_KEY` | Yes | Secret used to sign and validate JWT access tokens |
-| `API_KEY` | Yes | Google Gemini API key used for embeddings and answers |
-| `BASE_PATH` | Yes | Mounted directory for uploaded files |
-| `GF_SECURITY_ADMIN_USER` | Yes | Grafana administrator username |
-| `GF_SECURITY_ADMIN_PASSWORD` | Yes | Grafana administrator password |
-| `ALGORITHM` | No | JWT algorithm; defaults to `HS256` |
-| `EXPIRE_TOKEN_TIME` | No | JWT lifetime in minutes; defaults to `30` |
-| `DATABASE_URL` | Production Compose sets this | SQLAlchemy PostgreSQL connection URL |
-| `REDIS_URL` | Production Compose sets this | Redis URL used for Celery |
+- Límites de tamaño, número de páginas y tiempo de procesamiento para los PDF.
+- OCR para documentos escaneados; la extracción actual depende del texto disponible en el PDF.
+- Reintentos, backoff y recuperación de tareas Celery fallidas.
+- Almacenamiento de objetos duradero si se necesitan varias instancias o recuperación ante pérdida de la EC2.
+- Backups verificados de PostgreSQL y procedimientos de restauración.
+- Control de acceso a Grafana y `/metrics`, además de políticas de firewall de mínimo privilegio.
+- Gestión, rotación y almacenamiento seguro de secretos y claves de API.
+- Rate limiting, cuotas por usuario y políticas de retención/eliminación de documentos.
 
-Generate a strong secret locally, for example:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
-
-Keep `.env`, API keys, database credentials, and JWT secrets out of source control.
-
-## Docker Deployment
-
-Requirements:
-
-- Docker Engine or Docker Desktop
-- Docker Compose v2
-- A Google Gemini API key
-- At least 3072-dimensional embedding support in the configured Gemini model
-
-Start the full stack:
-
-```bash
-docker compose up --build -d
-```
-
-The Compose stack provides:
-
-- PostgreSQL with pgvector on an internal Docker network
-- Redis with append-only persistence
-- Alembic database migrations
-- FastAPI API
-- Celery worker
-- Caddy reverse proxy
-- Prometheus
-- Loki
-- Grafana Alloy
-- Grafana
-
-Public ports:
-
-| Service | URL or port |
-|---|---|
-| API through Caddy | `http://localhost` and `https://localhost` when certificates are available |
-| Grafana | `http://localhost:3000` |
-| Prometheus | Internal `prometheus:9090` |
-
-Caddy is configured with `localhost`, so its public configuration is intended primarily for local development. For a public domain, replace `localhost` in `caddyfile` with the domain and ensure DNS and inbound ports 80/443 are configured.
-
-Useful commands:
-
-```bash
-# Follow all service logs
-docker compose logs -f
-
-# Follow API or worker logs
-docker compose logs -f api worker
-
-# Show running services
-docker compose ps
-
-# Apply migrations
-docker compose run --rm migrations alembic upgrade head
-
-# Stop the stack and preserve volumes
-docker compose down
-
-# Remove the stack and its persisted data
-docker compose down -v
-```
-
-## Local Development
-
-Use Python 3.11 or newer in a virtual environment:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-Create a PostgreSQL database with pgvector enabled and set the required variables:
-
-```bash
-export DATABASE_URL="postgresql+psycopg2://postgresuser:password@localhost:5432/rag_production_db"
-export SECRET_KEY="replace-this-with-a-random-secret"
-export API_KEY="your-google-gemini-api-key"
-export REDIS_URL="redis://localhost:6379"
-export BASE_PATH="./data"
-```
-
-Run migrations:
-
-```bash
-alembic upgrade head
-```
-
-Start Redis and the API in separate terminals:
-
-```bash
-redis-server
-uvicorn src.infrastructure.api.main:app --reload --host 0.0.0.0 --port 8000
-celery -A src.infrastructure.celery.celery_app.celery_app worker --loglevel=info
-```
-
-The API will then be available at `http://localhost:8000`.
-
-## Tests
-
-The test configuration requires `DATABASE_URL` to contain `test` or `prueba`, preventing accidental execution against a production database. Run unit and integration tests with:
-
-```bash
-export DATABASE_URL="postgresql+psycopg2://tests_database_user:tests_database_password@localhost:5432/tests_database"
-export SECRET_KEY="test-secret"
-export API_KEY="test-key"
-export REDIS_URL="memory://"
-export BASE_PATH="./data"
-
-pytest
-ruff check
-ruff format --check
-```
-
-Alternatively, the test database and test container are included in Docker Compose:
-
-```bash
-docker compose up --build --abort-on-container-exit tests_database tests_container
-```
-
-The test container's command runs pytest, Ruff linting, and Ruff formatting checks.
-
-## Database and Vector Search
-
-Alembic migrations create and evolve the application tables. One migration updates document vectors to the 3072-column pgvector representation used by the embedding model.
-
-Key relationships:
-
-- A user owns documents and vectors.
-- A document belongs to a user and owns its vectors.
-- Deleting a user cascades to documents and vectors.
-- Deleting a document cascades to its vectors.
-
-Vector search is performed through pgvector against all of a user's vectors or against a specific document, depending on whether `file_id` is supplied.
-
-## Storage Behavior
-
-Uploaded PDFs are written to local storage under:
-
-```text
-users/<user_id>/<uuid>_<original_filename>
-```
-
-Docker mounts `uploads_data` to `BASE_PATH`, but the included adapter is local filesystem storage. A shared object store or distributed filesystem is required for horizontally scaled API/worker deployments.
-
-## Observability
-
-- `/health` provides a basic API status response.
-- `/metrics` exposes Prometheus metrics.
-- FastAPI request middleware records observability data.
-- The Celery worker emits task latency, operation, and error counters.
-- Prometheus scrapes the API at 15-second intervals.
-- Grafana is available on port 3000.
-- Alloy forwards container logs to Loki, based on `alloy/config.alloy`.
-
-Prometheus data, Grafana data, Redis data, PostgreSQL data, Caddy certificates, and uploaded files are persisted in Docker named volumes.
-
-## Operational Limitations
-
-This repository is a functional RAG system rather than a guarantee of production readiness. Before a public production deployment, review these areas:
-
-- Add a robust PDF page-limit and file-size policy.
-- Replace local filesystem storage with durable object storage for multiple replicas.
-- Add document processing status updates when work starts, not only on completion/failure.
-- Add retry policies and dead-letter handling for Celery tasks.
-- Add refresh tokens, logout/revocation, password policies, and stricter account validation.
-- Restrict CORS and add an explicit HTTP security policy.
-- Add readiness/liveness checks and backup/restore procedures.
-- Add file type verification by content, not only by upload MIME metadata.
-- Add rate limiting and query/document quotas.
-- Configure TLS for PostgreSQL and Redis where required.
-- Validate and pin third-party/model versions for reproducible deployments.
-
-## Project Structure
+## Estructura
 
 ```text
 .
-├── src/                         # Application source code
-├── test/unit/                   # Unit tests
-├── test/integration/            # API and database integration tests
-├── alembic/versions/            # Database migrations
-├── grafana/provisioning/        # Grafana datasource configuration
-├── loki/                        # Loki configuration
-├── alloy/                       # Grafana Alloy configuration
+├── src/
+│   ├── domain/             # Entidades, interfaces, excepciones y enums
+│   ├── use_cases/          # Flujos de autenticación, documentos y consultas
+│   └── infrastructure/     # API, base de datos, Celery, Gemini y observabilidad
+├── test/
+│   ├── unit/
+│   └── integration/
+├── alembic/                # Migraciones de base de datos
+├── docs/images/            # Capturas de EC2, API, métricas y logs
+├── grafana/provisioning/   # Orígenes de datos de Grafana
+├── loki/                   # Configuración de Loki
+├── alloy/                  # Recolección de logs Docker
 ├── Dockerfile
 ├── docker-compose.yml
+├── docker-compose.test.yml
 ├── prometheus.yml
 ├── caddyfile
-├── requirements.txt
-├── .env.example
-└── pyproject.toml
+└── requirements.txt
 ```
 
-## License
+## Licencia
 
-LICENSE by MIT LICENSES
+Consulta el archivo [LICENSE](LICENSE) para los términos de uso.
